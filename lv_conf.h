@@ -205,7 +205,7 @@
 #define LV_USE_SNAPSHOT 0
 
 /** ThorVG library for vector graphics support */
-#define LV_USE_THORVG 0
+#define LV_USE_THORVG 1
 
 #if LV_USE_THORVG
 /** Internal ThorVG library bundled with LVGL */
@@ -1943,11 +1943,11 @@
 #endif /*LV_USE_FS_FROGFS*/
 
 /** API for memory-mapped file access. */
-#define LV_USE_FS_MEMFS 0
+#define LV_USE_FS_MEMFS 1
 
 #if LV_USE_FS_MEMFS
 /** Driver-identifier letter for memfs (e.g. 65 for 'A', 0 = disabled) */
-#define LV_FS_MEMFS_LETTER 0
+#define LV_FS_MEMFS_LETTER 'M'
 
 #endif /*LV_USE_FS_MEMFS*/
 
