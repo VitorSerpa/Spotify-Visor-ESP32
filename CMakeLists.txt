@@ -69,7 +69,7 @@ add_compile_definitions($<$<BOOL:${LV_USE_FFMPEG}>:LV_USE_FFMPEG=1>)
 add_subdirectory(lvgl)
 target_include_directories(lvgl PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}> ${SDL2_INCLUDE_DIRS})
 
-set(MAIN_SOURCES src/mouse_cursor_icon.c src/hal/hal.c src/UI/screen.c)
+set(MAIN_SOURCES src/mouse_cursor_icon.c src/hal/hal.c src/UI/screen.c src/spotify/spotify.c)
 set(MAIN_LIBS lvgl lvgl::examples lvgl::demos lvgl::thorvg ${SDL2_LIBRARIES})
 
 # Create the main executable, depending on the FreeRTOS option
@@ -83,6 +83,11 @@ endif()
 
 if(NOT MSVC)
     list(APPEND MAIN_LIBS m pthread)
+endif()
+
+# Winsock para o cliente HTTP do Spotify (src/spotify/spotify.c)
+if(WIN32)
+    list(APPEND MAIN_LIBS ws2_32)
 endif()
 
 # Custom target to run the executable
