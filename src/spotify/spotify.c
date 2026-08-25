@@ -1,12 +1,11 @@
 /**
  * @file spotify.c
  *
- * Cliente HTTP mínimo, sem dependências externas, portável entre o simulador
- * PC (Windows/Winsock, Linux/macOS) e o ESP32 (lwIP expõe a mesma API de
- * sockets BSD do POSIX). A separação em duas camadas facilita o port:
+ * Cliente HTTP em duas camadas:
  *
- *   1) http_get()  -> transporte (sockets). No ESP32 pode ser trocado por
- *                     esp_http_client sem mexer no restante.
+ *   1) http_get()  -> transporte via libcurl (resolve DNS, TLS/HTTPS, redirect
+ *                     e chunked). No ESP32 pode ser trocado por esp_http_client
+ *                     mantendo a mesma assinatura, sem mexer no restante.
  *   2) json_*      -> extração dos campos (parser mínimo, sem cJSON).
  */
 
@@ -16,142 +15,81 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_WIN32)
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  typedef SOCKET sock_t;
-  #define SOCK_INVALID   INVALID_SOCKET
-  #define sock_close(s)  closesocket(s)
-#else
-  /* POSIX e ESP32 (lwIP) */
-  #include <sys/types.h>
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  #include <netdb.h>
-  #include <unistd.h>
-  typedef int sock_t;
-  #define SOCK_INVALID   (-1)
-  #define sock_close(s)  close(s)
-#endif
+#include <curl/curl.h>
 
-/** Inicializa a stack de sockets quando necessário (só o Windows precisa). */
-static int net_init(void)
+/* Buffer que cresce conforme o corpo da resposta chega. */
+typedef struct {
+    char  *data;
+    size_t len;
+} membuf_t;
+
+/* Callback do libcurl: acumula os pedaços recebidos no membuf. */
+static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userp)
 {
-#if defined(_WIN32)
-    WSADATA wsa;
-    return WSAStartup(MAKEWORD(2, 2), &wsa) == 0 ? 0 : -1;
-#else
-    return 0;
-#endif
+    size_t    n   = size * nmemb;
+    membuf_t *buf = (membuf_t *)userp;
+
+    char *tmp = (char *)realloc(buf->data, buf->len + n + 1);
+    if(!tmp) return 0;               /* aborta a transferência (erro de memória) */
+    buf->data = tmp;
+    memcpy(buf->data + buf->len, ptr, n);
+    buf->len += n;
+    buf->data[buf->len] = '\0';
+    return n;
 }
 
-static void net_deinit(void)
-{
-#if defined(_WIN32)
-    WSACleanup();
-#endif
-}
-
-
-static spotify_err_t http_get(const char *host, uint16_t port, const char *path,
-                              char **body_out, size_t *body_len_out)
+/**
+ * Faz um GET na `url` e devolve o corpo (heap) em *body_out.
+ * libcurl cuida de DNS, TLS/HTTPS, redirects e transfer-encoding.
+ * @return SPOTIFY_OK ou código de erro. Em sucesso o chamador deve free(*body_out).
+ */
+static spotify_err_t http_get(const char *url, char **body_out, size_t *body_len_out)
 {
     *body_out = NULL;
     if(body_len_out) *body_len_out = 0;
 
-    if(net_init() != 0) return SPOTIFY_ERR_SOCKET;
-
-    spotify_err_t rc   = SPOTIFY_OK;
-    sock_t        sock = SOCK_INVALID;
-    char         *resp = NULL;
-
-    /* --- Resolve o host (funciona com IP literal ou nome) --- */
-    char port_str[8];
-    snprintf(port_str, sizeof(port_str), "%u", (unsigned)port);
-
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family   = AF_INET;      
-    hints.ai_socktype = SOCK_STREAM;  
-
-    if(getaddrinfo(host, port_str, &hints, &res) != 0 || res == NULL) {
-        rc = SPOTIFY_ERR_SOCKET;
-        goto cleanup;
+    /* Inicialização global do libcurl uma única vez (uso single-thread aqui). */
+    static int inited = 0;
+    if(!inited) {
+        if(curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return SPOTIFY_ERR_SOCKET;
+        inited = 1;
     }
 
-    sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if(sock == SOCK_INVALID) { rc = SPOTIFY_ERR_SOCKET; goto cleanup; }
+    CURL *curl = curl_easy_init();
+    if(!curl) return SPOTIFY_ERR_SOCKET;
 
-    if(connect(sock, res->ai_addr, (int)res->ai_addrlen) != 0) {
-        rc = SPOTIFY_ERR_SOCKET;
-        goto cleanup;
+    membuf_t buf = {0};
+    buf.data = (char *)malloc(1);
+    if(!buf.data) { curl_easy_cleanup(curl); return SPOTIFY_ERR_MEM; }
+    buf.data[0] = '\0';
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);   /* segue redirects */
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "lvgl-spotify/1.0");
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, ""); /* aceita gzip/deflate */
+
+    CURLcode res = curl_easy_perform(curl);
+
+    long status = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_cleanup(curl);
+
+    if(res != CURLE_OK) {
+        /* curl_easy_strerror(res) tem a mensagem detalhada, se quiser logar. */
+        free(buf.data);
+        return SPOTIFY_ERR_RECV;
+    }
+    if(status != 200) {
+        free(buf.data);
+        return SPOTIFY_ERR_HTTP;
     }
 
-    char req[256];
-    int  req_len = snprintf(req, sizeof(req),
-                            "GET %s HTTP/1.1\r\n"
-                            "Host: %s:%u\r\n"
-                            "User-Agent: lvgl-spotify/1.0\r\n"
-                            "Accept: application/json\r\n"
-                            "Connection: close\r\n"
-                            "\r\n",
-                            path, host, (unsigned)port);
-    if(req_len <= 0 || req_len >= (int)sizeof(req)) { rc = SPOTIFY_ERR_SEND; goto cleanup; }
-
-    for(int sent = 0; sent < req_len; ) {
-        int n = (int)send(sock, req + sent, req_len - sent, 0);
-        if(n <= 0) { rc = SPOTIFY_ERR_SEND; goto cleanup; }
-        sent += n;
-    }
-
-    size_t cap = 8 * 1024, len = 0;
-    resp = (char *)malloc(cap);
-    if(!resp) { rc = SPOTIFY_ERR_MEM; goto cleanup; }
-
-    for(;;) {
-        if(len + 4096 + 1 > cap) {
-            size_t new_cap = cap * 2;
-            char  *tmp     = (char *)realloc(resp, new_cap);
-            if(!tmp) { rc = SPOTIFY_ERR_MEM; goto cleanup; }
-            resp = tmp;
-            cap  = new_cap;
-        }
-        int n = (int)recv(sock, resp + len, 4096, 0);
-        if(n < 0)  { rc = SPOTIFY_ERR_RECV; goto cleanup; }
-        if(n == 0) break; /* conexão encerrada = fim */
-        len += (size_t)n;
-    }
-    resp[len] = '\0';
-
-    if(strncmp(resp, "HTTP/1.", 7) != 0) { rc = SPOTIFY_ERR_HTTP; goto cleanup; }
-
-    int status = 0;
-    if(sscanf(resp, "HTTP/1.%*d %d", &status) != 1 || status != 200) {
-        rc = SPOTIFY_ERR_HTTP;
-        goto cleanup;
-    }
-
-    char *body = strstr(resp, "\r\n\r\n");
-    if(!body) { rc = SPOTIFY_ERR_HTTP; goto cleanup; }
-    body += 4;
-
-    size_t body_len = len - (size_t)(body - resp);
-
-    char *out = (char *)malloc(body_len + 1);
-    if(!out) { rc = SPOTIFY_ERR_MEM; goto cleanup; }
-    memcpy(out, body, body_len);
-    out[body_len] = '\0';
-
-    *body_out = out;
-    if(body_len_out) *body_len_out = body_len;
-
-cleanup:
-    if(resp) free(resp);
-    if(sock != SOCK_INVALID) sock_close(sock);
-    if(res)  freeaddrinfo(res);
-    net_deinit();
-    return rc;
+    *body_out = buf.data;
+    if(body_len_out) *body_len_out = buf.len;
+    return SPOTIFY_OK;
 }
 
 /*==================================================================
@@ -306,7 +244,7 @@ spotify_err_t spotify_get_music_info(spotify_music_info_t *out)
 
     char  *body = NULL;
     size_t body_len = 0;
-    spotify_err_t rc = http_get(SPOTIFY_HOST, SPOTIFY_PORT, SPOTIFY_PATH, &body, &body_len);
+    spotify_err_t rc = http_get(SPOTIFY_URL, &body, &body_len);
     if(rc != SPOTIFY_OK) return rc;
 
     out->music_id           = json_get_string(body, "music_id");

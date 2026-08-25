@@ -5,7 +5,6 @@
 #include "screen.h"
 #include "../spotify/spotify.h"
 
-/* Intervalo de atualização das informações da música (ms). */
 #define FETCH_INTERVAL_MS 3000
 
 #define ALBUM_IMG_PATH_64 "A:src/UI/images/ab67616d000048515124ed45a94033830b320500.jpg"
@@ -69,7 +68,6 @@ static int b64_val(char c)
     return -1;
 }
 
-/* Decodifica base64 para um buffer no heap. Chamador deve free(). */
 static uint8_t *base64_decode(const char *in, size_t *out_len)
 {
     /* Ignora um eventual prefixo data-URI ("...;base64,"). */
@@ -98,10 +96,8 @@ static uint8_t *base64_decode(const char *in, size_t *out_len)
     return out;
 }
 
-/* Le largura/altura de um JPEG (marcador SOF) ou PNG (IHDR) cru. */
 static bool img_get_dims(const uint8_t *d, size_t n, uint32_t *w, uint32_t *h)
 {
-    /* PNG: dimensoes no IHDR, offsets 16..23, big-endian. */
     if (n >= 24 && d[0] == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G')
     {
         *w = ((uint32_t)d[16] << 24) | (d[17] << 16) | (d[18] << 8) | d[19];
@@ -123,13 +119,12 @@ static bool img_get_dims(const uint8_t *d, size_t n, uint32_t *w, uint32_t *h)
                 *w = ((uint32_t)d[i + 7] << 8) | d[i + 8];
                 return true;
             }
-            /* Marcadores sem payload (SOI/EOI/RSTn): avanca 2 bytes. */
             if (marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7))
             {
                 i += 2;
                 continue;
             }
-            /* Demais segmentos: pula pelo tamanho (big-endian). */
+            
             uint16_t seg = ((uint16_t)d[i + 2] << 8) | d[i + 3];
             i += 2 + seg;
         }

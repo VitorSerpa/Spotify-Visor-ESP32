@@ -85,10 +85,11 @@ if(NOT MSVC)
     list(APPEND MAIN_LIBS m pthread)
 endif()
 
-# Winsock para o cliente HTTP do Spotify (src/spotify/spotify.c)
-if(WIN32)
-    list(APPEND MAIN_LIBS ws2_32)
-endif()
+# libcurl para o cliente HTTP do Spotify (src/spotify/spotify.c).
+# Linux: sudo apt install libcurl4-openssl-dev
+# Windows (vcpkg): vcpkg install curl
+find_package(CURL REQUIRED)
+list(APPEND MAIN_LIBS CURL::libcurl)
 
 # Custom target to run the executable
 # WORKING_DIRECTORY = raiz do projeto, para que caminhos de arquivo relativos

@@ -32,14 +32,9 @@ extern "C" {
 /*********************
  *      DEFINES
  *********************/
-#ifndef SPOTIFY_HOST
-  #define SPOTIFY_HOST "127.0.0.1"
-#endif
-#ifndef SPOTIFY_PORT
-  #define SPOTIFY_PORT 3000
-#endif
-#ifndef SPOTIFY_PATH
-  #define SPOTIFY_PATH "/get_music_info"
+/* URL completa do endpoint. Com libcurl, host/porta/TLS/redirect saem daqui. */
+#ifndef SPOTIFY_URL
+  #define SPOTIFY_URL "https://spotifydisplay.onrender.com/get_music_info"
 #endif
 
 /**********************
