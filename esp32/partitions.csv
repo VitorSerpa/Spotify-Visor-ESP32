@@ -1,0 +1,10 @@
+# Name,   Type, SubType, Offset,  Size
+# A flash e de 4 MB; descontando bootloader, tabela, nvs e phy sobram ~3.94 MB
+# para o app. Os 3.75 MB abaixo acomodam a fonte japonesa (kana + 6357 kanji em
+# dois tamanhos, ~1.9 MB), que e o unico jeito de exibir titulos em japones sem
+# gastar RAM -- o recurso escasso nesta placa.
+#
+# Nao ha espaco para OTA, e nao precisa: a gravacao e sempre por USB.
+nvs,      data, nvs,     ,        24K
+phy_init, data, phy,     ,        4K
+factory,  app,  factory, ,        3840K

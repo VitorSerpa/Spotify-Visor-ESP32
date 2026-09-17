@@ -69,7 +69,9 @@ add_compile_definitions($<$<BOOL:${LV_USE_FFMPEG}>:LV_USE_FFMPEG=1>)
 add_subdirectory(lvgl)
 target_include_directories(lvgl PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}> ${SDL2_INCLUDE_DIRS})
 
-set(MAIN_SOURCES src/mouse_cursor_icon.c src/hal/hal.c src/UI/screen.c src/spotify/spotify.c)
+set(MAIN_SOURCES src/mouse_cursor_icon.c src/hal/hal.c src/UI/screen.c src/spotify/spotify.c
+    src/UI/fonts/lv_font_pt_14.c src/UI/fonts/lv_font_pt_20.c
+    src/UI/fonts/lv_font_jp_14.c src/UI/fonts/lv_font_jp_20.c)
 set(MAIN_LIBS lvgl lvgl::examples lvgl::demos lvgl::thorvg ${SDL2_LIBRARIES})
 
 # Create the main executable, depending on the FreeRTOS option
@@ -151,7 +153,7 @@ if(LVGL_PRO_PROJECT_DIR)
 endif()
 
 add_executable(main ${MAIN_SOURCES})
-target_compile_definitions(main PRIVATE LV_CONF_INCLUDE_SIMPLE)
+target_compile_definitions(main PRIVATE LV_CONF_INCLUDE_SIMPLE LV_LVGL_H_INCLUDE_SIMPLE)
 target_link_libraries(main ${MAIN_LIBS})
 
 # On Windows, GUI applications do not show a console by default,

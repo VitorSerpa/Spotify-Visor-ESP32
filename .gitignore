@@ -10,3 +10,9 @@ bin/
 
 # MacOS file
 .DS_Store
+
+# ESP-IDF: sdkconfig guarda a senha do WiFi, nao versionar.
+esp32/sdkconfig
+esp32/sdkconfig.old
+esp32/managed_components/
+esp32/dependencies.lock

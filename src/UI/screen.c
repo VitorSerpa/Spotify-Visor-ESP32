@@ -1,4 +1,6 @@
-#include <lvgl/lvgl.h>
+/* "lvgl.h" e nao "lvgl/lvgl.h": no ESP-IDF o componente e instalado como
+ * managed_components/lvgl__lvgl, entao so a forma curta resolve nos dois. */
+#include "lvgl.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,7 +9,57 @@
 
 #define FETCH_INTERVAL_MS 3000
 
-#define ALBUM_IMG_PATH_64 "A:src/UI/images/ab67616d000048515124ed45a94033830b320500.jpg"
+/* No ESP32 nao ha filesystem montado: a tela sobe vazia e as capas chegam
+ * pela rede. No simulador as imagens de exemplo vem do disco. */
+#ifdef ESP_PLATFORM
+  #define SCREEN_HAS_FILE_IMAGES 0
+#else
+  #define SCREEN_HAS_FILE_IMAGES 1
+#endif
+
+/* Lado da capa quando nao ha imagem para definir o tamanho sozinha. */
+#define COVER_SIZE 200
+
+/*
+ * Fontes proprias, geradas de src/UI/fonts/. As montserrat embutidas do LVGL
+ * cobrem so ASCII 0x20-0x7F, entao qualquer titulo com acento -- "Coracao",
+ * "E o Amor" -- perde caracteres. Estas incluem tambem 0xA0-0xFF (Latin-1),
+ * que cobre portugues, espanhol, frances, alemao e nordicos.
+ */
+LV_FONT_DECLARE(lv_font_pt_14);
+LV_FONT_DECLARE(lv_font_pt_20);
+
+/*
+ * Fonte japonesa (kana e kanji), usada como fallback das latinas: o LVGL
+ * procura o glifo na fonte principal e, se nao achar, desce para a `fallback`.
+ * Assim o texto latino continua em Montserrat e so os caracteres japoneses
+ * saem da Droid Sans Japanese.
+ *
+ * Sao ~1 MB de glifos, que vivem na FLASH, nao na RAM -- por isso cabem: a
+ * flash de 4 MB tinha 2 MB sem uso, enquanto a RAM tem 33 KB livres.
+ */
+LV_FONT_DECLARE(lv_font_jp_14);
+LV_FONT_DECLARE(lv_font_jp_20);
+
+/* Copias mutaveis das fontes latinas, so para poder apontar o fallback: as
+ * geradas sao `const` e o lv_font_conv nao emite esse campo. */
+static lv_font_t font_14;
+static lv_font_t font_20;
+
+static void fonts_init(void)
+{
+    font_14          = lv_font_pt_14;
+    font_14.fallback = &lv_font_jp_14;
+    font_20          = lv_font_pt_20;
+    font_20.fallback = &lv_font_jp_20;
+}
+
+/* Chave para medir o custo do recorte circular: o clip_corner faz o LVGL
+ * alocar uma camada intermediaria a cada desenho, e a capa redesenha 20x por
+ * segundo por causa da rotacao. */
+#ifndef SCREEN_CLIP_CIRCLE
+  #define SCREEN_CLIP_CIRCLE 1
+#endif
 
 typedef struct
 {
@@ -22,7 +74,7 @@ typedef struct
 
 Screen_itens itens = {
     .id_music = 1,
-    .ALBUM_IMG_PATH_300 = "A:src/UI/images/nirvana.png",
+    .ALBUM_IMG_PATH_300 = "A:src/UI/images/album_300.png",
     .BLURRY_BACKGROUND = "A:src/UI/images/blurryBackground.png",
     .music_name = "About a Girl",
     .artists = "Nirvana",
@@ -34,9 +86,11 @@ typedef struct
     lv_obj_t *scr;
     lv_obj_t *music_label;
     lv_obj_t *artists_label;
+    lv_obj_t *cover_box; /* recorta a capa em circulo; ver screen_create() */
     lv_obj_t *img_create;
     lv_obj_t *bg_create;
     lv_obj_t *slider_create;
+    lv_obj_t *status_label;
 } Screen_layout;
 
 static Screen_layout layout;
@@ -160,7 +214,7 @@ static void update_cover(lv_obj_t *img, cover_t *cov, const char *b64)
     cov->data = bytes;
     memset(&cov->dsc, 0, sizeof(cov->dsc));
     cov->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
-    cov->dsc.header.cf    = LV_COLOR_FORMAT_RAW; /* dados codificados; decoder resolve */
+    cov->dsc.header.cf    = LV_COLOR_FORMAT_RAW; 
     cov->dsc.header.w     = w;
     cov->dsc.header.h     = h;
     cov->dsc.data         = cov->data;
@@ -175,19 +229,90 @@ static void apply_track(const char *name, const char *artists, int64_t duration_
     lv_label_set_text(layout.music_label, name ? name : "");
     lv_label_set_text(layout.artists_label, artists ? artists : "");
 
-    lv_obj_align_to(layout.music_label, layout.img_create, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 15);
+    lv_obj_align_to(layout.music_label, layout.cover_box, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 15);
     lv_obj_align_to(layout.artists_label, layout.music_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 2);
 
     lv_slider_set_range(layout.slider_create, 0, (int32_t)duration_ms);
 }
 
+void screen_set_status(const char *text)
+{
+    if (!layout.status_label) return;
+
+    if (!text || !*text)
+    {
+        lv_obj_add_flag(layout.status_label, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    lv_label_set_text(layout.status_label, text);
+    lv_obj_remove_flag(layout.status_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(layout.status_label);
+}
+
+void screen_set_cover(const lv_image_dsc_t *dsc)
+{
+    if (!dsc || !layout.img_create) return;
+
+    /* A imagem anterior compartilha o mesmo buffer: sem limpar o cache o LVGL
+     * continuaria desenhando a capa antiga. */
+    lv_image_cache_drop(dsc);
+    lv_image_set_src(layout.img_create, dsc);
+    lv_obj_set_size(layout.img_create, dsc->header.w, dsc->header.h);
+    /* Apaga o fundo do placeholder: ele e desenhado atras da imagem e, com a
+     * capa recortada em circulo, apareceria como um quadrado nos cantos. */
+    lv_obj_set_style_bg_opa(layout.img_create, LV_OPA_TRANSP, LV_PART_MAIN);
+    /* Centrada no container circular, que e quem faz o recorte. */
+    lv_obj_center(layout.img_create);
+
+    lv_obj_update_layout(layout.img_create);
+    lv_image_set_pivot(layout.img_create, dsc->header.w / 2, dsc->header.h / 2);
+}
+
+void screen_set_background(const lv_image_dsc_t *dsc)
+{
+    if (!dsc || !layout.bg_create) return;
+
+    lv_image_cache_drop(dsc);
+    lv_image_set_src(layout.bg_create, dsc);
+    /* Reaplica o stretch: lv_image_set_src recalcula o tamanho pela imagem. */
+    lv_obj_set_size(layout.bg_create, LV_PCT(100), LV_PCT(100));
+    lv_image_set_inner_align(layout.bg_create, LV_IMAGE_ALIGN_STRETCH);
+    lv_obj_align(layout.bg_create, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_move_background(layout.bg_create);
+}
+
+void screen_apply_info(const spotify_music_info_t *info)
+{
+    if (!info) return;
+
+    screen_set_status(NULL);
+
+    const char *id = info->music_id ? info->music_id : "";
+    if (strcmp(id, current_id) != 0)
+    {
+        snprintf(current_id, sizeof(current_id), "%s", id);
+        apply_track(info->music_name, info->artists, info->music_duration_ms);
+
+        /* Atualiza a capa e o fundo borrado (base64 -> imagem). */
+        update_cover(layout.img_create, &cover_main, info->album_cover);
+        update_cover(layout.bg_create, &cover_bg, info->blurry_album_cover);
+
+        /* Recalcula o pivo apos trocar a capa (a rotacao usa o centro). */
+        lv_obj_update_layout(layout.img_create);
+        lv_image_set_pivot(layout.img_create,
+                           lv_obj_get_width(layout.img_create) / 2,
+                           lv_obj_get_height(layout.img_create) / 2);
+    }
+
+    lv_slider_set_value(layout.slider_create, (int32_t)info->player_progress_ms, LV_ANIM_OFF);
+}
+
+#if SCREEN_HAS_FILE_IMAGES
 /*
- * Busca as informacoes da musica no servidor e atualiza a tela.
- *
- * ATENCAO: spotify_get_music_info() e BLOQUEANTE (socket). Aqui roda na thread
- * do LVGL, entao a UI congela pelo tempo da requisicao. Em localhost costuma
- * ser rapido; em producao (ou no ESP32) o ideal e rodar em uma task/thread
- * separada e apenas repassar o resultado para a UI.
+ * No simulador a busca roda no proprio timer do LVGL. spotify_get_music_info()
+ * e bloqueante, entao a UI congela pelo tempo da requisicao -- aceitavel no PC.
+ * No ESP32 quem chama screen_apply_info() e a task de rede (ver esp32/main).
  */
 static void fetch_and_update(lv_timer_t *timer)
 {
@@ -198,30 +323,14 @@ static void fetch_and_update(lv_timer_t *timer)
     if (err != SPOTIFY_OK)
     {
         LV_LOG_WARN("spotify: %s", spotify_strerror(err));
+        screen_set_status(spotify_strerror(err));
         return;
     }
 
-    const char *id = info.music_id ? info.music_id : "";
-    if (strcmp(id, current_id) != 0)
-    {
-        snprintf(current_id, sizeof(current_id), "%s", id);
-        apply_track(info.music_name, info.artists, info.music_duration_ms);
-
-        /* Atualiza a capa e o fundo borrado (base64 -> imagem). */
-        update_cover(layout.img_create, &cover_main, info.album_cover);
-        update_cover(layout.bg_create, &cover_bg, info.blurry_album_cover);
-
-        /* Recalcula o pivo apos trocar a capa (a rotacao usa o centro). */
-        lv_obj_update_layout(layout.img_create);
-        lv_image_set_pivot(layout.img_create,
-                           lv_obj_get_width(layout.img_create) / 2,
-                           lv_obj_get_height(layout.img_create) / 2);
-    }
-
-    lv_slider_set_value(layout.slider_create, (int32_t)info.player_progress_ms, LV_ANIM_OFF);
-
+    screen_apply_info(&info);
     spotify_music_info_free(&info);
 }
+#endif
 
 static void rotate_image(lv_timer_t *timer)
 {
@@ -239,41 +348,69 @@ static void rotate_image(lv_timer_t *timer)
 
 void screen_create(void)
 {
+    fonts_init();
+
     layout.scr = lv_screen_active();
     layout.music_label = lv_label_create(layout.scr);
     layout.artists_label = lv_label_create(layout.scr);
-    layout.img_create = lv_image_create(layout.scr);
+    /* A capa fica dentro de um container circular porque o clip_corner do LVGL
+     * mascara os FILHOS de um objeto, nao o desenho dele mesmo. Assim a imagem
+     * girada e recortada no circulo sem precisar de canal alfa: os cantos do
+     * quadrado giram sempre fora do raio e sao descartados no desenho. */
+    layout.cover_box = lv_obj_create(layout.scr);
+    lv_obj_remove_style_all(layout.cover_box);
+    lv_obj_set_style_radius(layout.cover_box, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_clip_corner(layout.cover_box, SCREEN_CLIP_CIRCLE, LV_PART_MAIN);
+
+    layout.img_create = lv_image_create(layout.cover_box);
     layout.bg_create = lv_image_create(layout.scr);
     layout.slider_create = lv_slider_create(layout.scr);
+    layout.status_label = lv_label_create(layout.scr);
 
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x202020), LV_PART_MAIN);
 
+#if SCREEN_HAS_FILE_IMAGES
     lv_image_set_src(layout.bg_create, itens.BLURRY_BACKGROUND);
-    lv_obj_set_size(layout.bg_create, LV_PCT(100), LV_PCT(100));    
-    lv_image_set_inner_align(layout.bg_create, LV_IMAGE_ALIGN_STRETCH); 
+#endif
+    lv_obj_set_size(layout.bg_create, LV_PCT(100), LV_PCT(100));
+    lv_image_set_inner_align(layout.bg_create, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_align(layout.bg_create, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_move_background(layout.bg_create);
 
+    /* O container define a area circular; a imagem so preenche o centro dele. */
+    lv_obj_set_size(layout.cover_box, COVER_SIZE, COVER_SIZE);
+    lv_obj_align(layout.cover_box, LV_ALIGN_TOP_MID, 0, 10);
+
+#if SCREEN_HAS_FILE_IMAGES
     lv_image_set_src(layout.img_create, itens.ALBUM_IMG_PATH_300);
-    lv_obj_align(layout.img_create, LV_ALIGN_TOP_MID, 0, 10);
+#else
+    /* Sem imagem ainda: um disco escuro segura o lugar da capa. O raio vale
+     * para o fundo do widget, entao nao custa camada de recorte nenhuma. */
+    lv_obj_set_size(layout.img_create, COVER_SIZE, COVER_SIZE);
+    lv_obj_set_style_bg_color(layout.img_create, lv_color_hex(0x303030), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(layout.img_create, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(layout.img_create, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+#endif
+    lv_obj_center(layout.img_create);
 
     lv_obj_update_layout(layout.img_create);
-    lv_image_set_pivot(layout.img_create, lv_obj_get_width(layout.img_create) / 2, lv_obj_get_height(layout.img_create) / 2);
+    lv_image_set_pivot(layout.img_create, lv_obj_get_width(layout.cover_box) / 2, lv_obj_get_height(layout.img_create) / 2);
     lv_timer_create(rotate_image, 50, layout.img_create);
 
     lv_obj_set_style_text_color(layout.music_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_color(layout.artists_label, lv_color_hex(0xAAAAAA), LV_PART_MAIN);
-    lv_obj_set_style_text_font(layout.music_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(layout.music_label, &font_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(layout.artists_label, &font_14, LV_PART_MAIN);
 
-    lv_obj_set_width(layout.music_label, lv_obj_get_width(layout.img_create));
-    lv_obj_set_width(layout.artists_label, lv_obj_get_width(layout.img_create));
+    lv_obj_set_width(layout.music_label, lv_obj_get_width(layout.cover_box));
+    lv_obj_set_width(layout.artists_label, lv_obj_get_width(layout.cover_box));
 
     lv_label_set_text(layout.music_label, itens.music_name);
     lv_label_set_long_mode(layout.music_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
     lv_label_set_text(layout.artists_label, itens.artists);
     lv_label_set_long_mode(layout.artists_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
 
-    lv_obj_align_to(layout.music_label, layout.img_create, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 15);
+    lv_obj_align_to(layout.music_label, layout.cover_box, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 15);
     lv_obj_align_to(layout.artists_label, layout.music_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 2);
 
     lv_obj_set_size(layout.slider_create, lv_pct(90), 3);
@@ -288,5 +425,15 @@ void screen_create(void)
     int32_t prog_y = lv_obj_get_y(layout.artists_label) + lv_obj_get_height(layout.artists_label) + 15;
     lv_obj_align(layout.slider_create, LV_ALIGN_TOP_MID, 0, prog_y);
 
+    lv_obj_set_style_text_color(layout.status_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_text_font(layout.status_label, &font_14, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(layout.status_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(layout.status_label, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(layout.status_label, 8, LV_PART_MAIN);
+    lv_obj_align(layout.status_label, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_add_flag(layout.status_label, LV_OBJ_FLAG_HIDDEN);
+
+#if SCREEN_HAS_FILE_IMAGES
     lv_timer_create(fetch_and_update, FETCH_INTERVAL_MS, NULL);
+#endif
 }

@@ -1,0 +1,134 @@
+menu "Spotify Display"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default "minha-rede"
+        help
+            Nome da rede WiFi (2.4 GHz - o ESP32 nao enxerga 5 GHz).
+            Configure pelo menuconfig: o valor vai para o sdkconfig, que nao
+            e versionado. Nao coloque a rede real aqui neste default.
+
+    config WIFI_PASSWORD
+        string "WiFi password"
+        default ""
+        help
+            Senha da rede. Deixe vazio para uma rede aberta.
+            Configure pelo menuconfig, nunca neste default: este arquivo vai
+            para o git e a senha vazaria no push.
+
+    config WIFI_SSID2
+        string "WiFi SSID (rede alternativa)"
+        default ""
+        help
+            Segunda rede, tentada quando a primeira falha. Util para levar a
+            placa para fora de casa usando o hotspot do celular. Deixe vazio
+            para usar so a principal. Configure pelo menuconfig, nao aqui.
+
+    config WIFI_PASSWORD2
+        string "WiFi password (rede alternativa)"
+        default ""
+        help
+            Senha da rede alternativa. Configure pelo menuconfig: este arquivo
+            vai para o git.
+
+    config WIFI_MAX_RETRY
+        int "Tentativas antes de trocar de rede"
+        default 5
+        help
+            Quantas tentativas numa rede antes de passar para a proxima da
+            lista. A placa nunca desiste: as redes sao tentadas em ciclo.
+
+    config SPOTIFY_ENDPOINT
+        string "URL do endpoint de informacoes da musica"
+        default "https://spotifydisplay.onrender.com/get_music_info"
+
+    config SPOTIFY_POLL_INTERVAL_MS
+        int "Intervalo entre consultas (ms)"
+        default 3000
+
+    config LCD_BACKLIGHT_ON_LEVEL
+        int "Nivel logico que acende o backlight"
+        default 1
+        range 0 1
+        help
+            Na maioria das placas ESP32-2432S028R o backlight acende com nivel
+            alto. Se a tela ficar apagada mas o conteudo aparecer ao iluminar
+            de lado, troque para 0.
+
+    config LCD_BRIGHTNESS
+        int "Brilho do backlight (%)"
+        default 60
+        range 5 100
+        help
+            Num LCD o preto e a luz do backlight vazando pelo pixel, entao
+            baixar o brilho escurece o preto de verdade -- coisa que o gamma
+            sozinho nao faz. Em compensacao o branco tambem escurece: a relacao
+            de contraste nao muda, o que muda e o quanto a tela incomoda num
+            ambiente escuro.
+
+    config LCD_TUNE_GAMMA
+        bool "Ajustar gamma e VCOM do painel"
+        default y
+        help
+            Sobrescreve VCOM (0xC5/0xC7) e a curva de gamma (0xE0/0xE1) que o
+            driver do ILI9341 configura por padrao. Quem manda no nivel de
+            preto e o VCOM: o padrao usa 0x43/0x4C contra 0x3E/0x28 da
+            referencia, e o valor mais alto deixa o preto acinzentado.
+            Desligue para comparar com o original.
+
+    config BG_BRIGHTNESS
+        int "Brilho do fundo borrado (%)"
+        default 55
+        range 10 100
+        help
+            A capa borrada ocupa a tela inteira, entao e ela, e nao o painel,
+            que define o quanto a tela parece escura. Escurecer aqui e bem mais
+            eficaz que mexer no VCOM, e ainda destaca a capa em cima.
+
+    config COVER_SATURATION
+        int "Saturacao da capa (%)"
+        default 125
+        range 100 200
+        help
+            100 mantem a imagem como veio. Acima disso afasta cada pixel do
+            cinza correspondente, compensando o achatamento do RGB565, que so
+            tem 32 niveis de vermelho e azul. Acima de ~150 as cores comecam a
+            estourar e a perder detalhe nas areas mais vivas.
+
+    config LCD_TEST_PATTERN
+        bool "Mostrar padrao de teste no boot"
+        default n
+        help
+            Desenha quadrados coloridos em cantos conhecidos e mantem na tela,
+            para identificar orientacao, cores e integridade do painel sem
+            depender de adivinhacao. Enquanto ligado a interface normal nao
+            sobe. Desligue quando o display estiver ajustado.
+
+    config LCD_SWAP_XY
+        bool "Trocar os eixos X/Y do painel"
+        default y
+        help
+            Necessario na ESP32-2432S028R: sem isso o painel recebe o desenho
+            transposto, o conteudo sai girado e as linhas que sobram ficam com
+            lixo. Nao altera a resolucao logica, que segue 240x320.
+
+    config LCD_MIRROR_X
+        bool "Espelhar na horizontal"
+        default n
+        help
+            Ative se o texto aparecer espelhado da esquerda para a direita.
+
+    config LCD_MIRROR_Y
+        bool "Espelhar na vertical"
+        default n
+        help
+            Ative se a imagem aparecer de cabeca para baixo.
+
+    config LCD_INVERT_COLOR
+        bool "Inverter cores do painel"
+        default n
+        help
+            Ative se a imagem aparecer com as cores negativadas - fundo claro
+            onde deveria ser escuro, texto escuro onde deveria ser branco.
+
+endmenu

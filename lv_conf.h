@@ -1058,7 +1058,7 @@
  *  but with > 10,000 characters if you see issues probably you
  *  need to enable it.
  */
-#define LV_FONT_FMT_TXT_LARGE 0
+#define LV_FONT_FMT_TXT_LARGE 1
 
 /** Enables/disables support for compressed fonts. */
 #define LV_USE_FONT_COMPRESSED 0
