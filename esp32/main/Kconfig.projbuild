@@ -44,7 +44,12 @@ menu "Spotify Display"
 
     config SPOTIFY_POLL_INTERVAL_MS
         int "Intervalo entre consultas (ms)"
-        default 3000
+        default 15000
+        help
+            A 3 s eram 1200 requisicoes por hora e a API do Spotify respondia
+            429 (QUOTA_EXCEEDED), derrubando o servidor inteiro por um tempo.
+            A 15 s sao 240 por hora. A barra de progresso nao piora: ela avanca
+            sozinha entre as consultas, usando o relogio local.
 
     config LCD_BACKLIGHT_ON_LEVEL
         int "Nivel logico que acende o backlight"
@@ -57,7 +62,7 @@ menu "Spotify Display"
 
     config LCD_BRIGHTNESS
         int "Brilho do backlight (%)"
-        default 60
+        default 45
         range 5 100
         help
             Num LCD o preto e a luz do backlight vazando pelo pixel, entao
@@ -78,12 +83,22 @@ menu "Spotify Display"
 
     config BG_BRIGHTNESS
         int "Brilho do fundo borrado (%)"
-        default 55
+        default 40
         range 10 100
         help
             A capa borrada ocupa a tela inteira, entao e ela, e nao o painel,
             que define o quanto a tela parece escura. Escurecer aqui e bem mais
             eficaz que mexer no VCOM, e ainda destaca a capa em cima.
+
+    config IMAGE_GAMMA
+        int "Gamma das imagens (%)"
+        default 145
+        range 100 250
+        help
+            100 nao mexe. Acima disso aprofunda pretos e medios preservando os
+            claros, que e o que tira o aspecto lavado -- diferente do brilho,
+            que escurece tudo por igual e mantem a falta de contraste. Acima de
+            ~180 os detalhes na sombra comecam a se fundir.
 
     config COVER_SATURATION
         int "Saturacao da capa (%)"

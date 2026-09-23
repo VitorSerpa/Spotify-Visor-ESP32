@@ -90,6 +90,8 @@ typedef struct
     lv_obj_t *img_create;
     lv_obj_t *bg_create;
     lv_obj_t *slider_create;
+    lv_obj_t *time_label; /* posicao atual, a esquerda da barra  */
+    lv_obj_t *dur_label;  /* duracao total, a direita da barra   */
     lv_obj_t *status_label;
 } Screen_layout;
 
@@ -223,6 +225,52 @@ static void update_cover(lv_obj_t *img, cover_t *cov, const char *b64)
     lv_image_set_src(img, &cov->dsc);
 }
 
+/*
+ * Progresso estimado entre uma consulta e outra.
+ *
+ * A consulta e espacada para nao estourar a cota da API do Spotify, mas a
+ * barra continua andando de meio em meio segundo: guarda-se o ultimo valor
+ * conhecido e soma-se o tempo decorrido desde que ele chegou. Cada resposta
+ * nova corrige qualquer desvio acumulado.
+ */
+static int64_t  prog_ms;
+static int64_t  prog_total_ms;
+static uint32_t prog_tick;
+
+/** Formata milissegundos como m:ss (ou h:mm:ss para faixas muito longas). */
+static void fmt_ms(char *out, size_t n, int64_t ms)
+{
+    if (ms < 0) ms = 0;
+    const int total = (int)(ms / 1000);
+    const int h = total / 3600;
+    const int m = (total % 3600) / 60;
+    const int s = total % 60;
+
+    if (h > 0) snprintf(out, n, "%d:%02d:%02d", h, m, s);
+    else       snprintf(out, n, "%d:%02d", m, s);
+}
+
+static void progress_tick(lv_timer_t *timer)
+{
+    LV_UNUSED(timer);
+    if (prog_total_ms <= 0 || !layout.slider_create) return;
+
+    int64_t agora = prog_ms + (int64_t)lv_tick_elaps(prog_tick);
+    if (agora > prog_total_ms) agora = prog_total_ms;
+    lv_slider_set_value(layout.slider_create, (int32_t)agora, LV_ANIM_OFF);
+
+    /* O timer roda a cada 500 ms, mas o texto so muda uma vez por segundo:
+     * reescrever o label a cada volta invalidaria a area a toa. */
+    static int ultimo_seg = -1;
+    const int  seg = (int)(agora / 1000);
+    if (seg != ultimo_seg && layout.time_label) {
+        ultimo_seg = seg;
+        char buf[16];
+        fmt_ms(buf, sizeof(buf), agora);
+        lv_label_set_text(layout.time_label, buf);
+    }
+}
+
 /* Atualiza os textos e o range do slider quando a faixa muda. */
 static void apply_track(const char *name, const char *artists, int64_t duration_ms)
 {
@@ -233,6 +281,12 @@ static void apply_track(const char *name, const char *artists, int64_t duration_
     lv_obj_align_to(layout.artists_label, layout.music_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 2);
 
     lv_slider_set_range(layout.slider_create, 0, (int32_t)duration_ms);
+
+    if (layout.dur_label) {
+        char buf[16];
+        fmt_ms(buf, sizeof(buf), duration_ms);
+        lv_label_set_text(layout.dur_label, buf);
+    }
 }
 
 void screen_set_status(const char *text)
@@ -305,7 +359,10 @@ void screen_apply_info(const spotify_music_info_t *info)
                            lv_obj_get_height(layout.img_create) / 2);
     }
 
-    lv_slider_set_value(layout.slider_create, (int32_t)info->player_progress_ms, LV_ANIM_OFF);
+    prog_ms       = info->player_progress_ms;
+    prog_total_ms = info->music_duration_ms;
+    prog_tick     = lv_tick_get();
+    lv_slider_set_value(layout.slider_create, (int32_t)prog_ms, LV_ANIM_OFF);
 }
 
 #if SCREEN_HAS_FILE_IMAGES
@@ -365,6 +422,8 @@ void screen_create(void)
     layout.img_create = lv_image_create(layout.cover_box);
     layout.bg_create = lv_image_create(layout.scr);
     layout.slider_create = lv_slider_create(layout.scr);
+    layout.time_label = lv_label_create(layout.scr);
+    layout.dur_label = lv_label_create(layout.scr);
     layout.status_label = lv_label_create(layout.scr);
 
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x202020), LV_PART_MAIN);
@@ -425,6 +484,17 @@ void screen_create(void)
     int32_t prog_y = lv_obj_get_y(layout.artists_label) + lv_obj_get_height(layout.artists_label) + 15;
     lv_obj_align(layout.slider_create, LV_ALIGN_TOP_MID, 0, prog_y);
 
+    /* Tempos nas pontas da barra, como num player: decorrido a esquerda,
+     * duracao a direita. Cinza para nao competir com o nome da musica. */
+    lv_obj_set_style_text_font(layout.time_label, &font_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(layout.dur_label, &font_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(layout.time_label, lv_color_hex(0xAAAAAA), LV_PART_MAIN);
+    lv_obj_set_style_text_color(layout.dur_label, lv_color_hex(0xAAAAAA), LV_PART_MAIN);
+    lv_label_set_text(layout.time_label, "0:00");
+    lv_label_set_text(layout.dur_label, "0:00");
+    lv_obj_align_to(layout.time_label, layout.slider_create, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 6);
+    lv_obj_align_to(layout.dur_label, layout.slider_create, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 6);
+
     lv_obj_set_style_text_color(layout.status_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(layout.status_label, &font_14, LV_PART_MAIN);
     lv_obj_set_style_bg_color(layout.status_label, lv_color_hex(0x000000), LV_PART_MAIN);
@@ -432,6 +502,8 @@ void screen_create(void)
     lv_obj_set_style_pad_all(layout.status_label, 8, LV_PART_MAIN);
     lv_obj_align(layout.status_label, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_add_flag(layout.status_label, LV_OBJ_FLAG_HIDDEN);
+
+    lv_timer_create(progress_tick, 500, NULL);
 
 #if SCREEN_HAS_FILE_IMAGES
     lv_timer_create(fetch_and_update, FETCH_INTERVAL_MS, NULL);

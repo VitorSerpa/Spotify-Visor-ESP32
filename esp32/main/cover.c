@@ -2,12 +2,33 @@
 
 #include "esp_log.h"
 #include "jpeg_decoder.h"
+#include <math.h>
 #include <string.h>
 
 static const char *TAG = "cover";
 
+/*
+ * Curva de gamma, montada uma vez. Multiplicar todos os pixels por um fator
+ * (o que o brilho faz) escurece preto e branco na mesma proporcao e mantem a
+ * imagem igualmente lavada. A gamma e diferente: puxa escuros e medios para
+ * baixo e quase nao mexe nos claros, que e o que de fato aprofunda o preto.
+ *
+ *     saida = 255 * (entrada/255) ^ (gamma/100)
+ */
+static uint8_t s_gamma_lut[256];
+static int     s_gamma_feita;
+
+static void build_gamma_lut(int percent)
+{
+    const float g = (float)percent / 100.0f;
+    for(int i = 0; i < 256; i++) {
+        s_gamma_lut[i] = (uint8_t)(powf((float)i / 255.0f, g) * 255.0f + 0.5f);
+    }
+    s_gamma_feita = percent;
+}
+
 /**
- * Ajusta saturacao e brilho dos pixels ja decodificados.
+ * Ajusta saturacao, gamma e brilho dos pixels ja decodificados.
  *
  * O RGB565 tem 32 niveis de vermelho e azul contra os 256 do original, e isso
  * achata as cores; `sat` compensa afastando cada pixel do seu cinza. `bright`
@@ -17,7 +38,9 @@ static const char *TAG = "cover";
  */
 static void adjust_pixels(uint8_t *rgb565, uint32_t w, uint32_t h, int sat, int bright)
 {
-    if(sat == 100 && bright == 100) return;
+    const int gamma = CONFIG_IMAGE_GAMMA;
+    if(sat == 100 && bright == 100 && gamma == 100) return;
+    if(s_gamma_feita != gamma) build_gamma_lut(gamma);
 
     uint16_t    *px = (uint16_t *)rgb565;
     const size_t n  = (size_t)w * h;
@@ -40,13 +63,17 @@ static void adjust_pixels(uint8_t *rgb565, uint32_t w, uint32_t h, int sat, int 
         g = luma + (g - luma) * sat / 100;
         b = luma + (b - luma) * sat / 100;
 
-        r = r * bright / 100;
-        g = g * bright / 100;
-        b = b * bright / 100;
-
+        /* Limita ANTES da tabela: a saturacao pode jogar o valor para fora de
+         * 0-255, e indexar a LUT com isso seria leitura fora do array. */
         if(r < 0) r = 0; else if(r > 255) r = 255;
         if(g < 0) g = 0; else if(g > 255) g = 255;
         if(b < 0) b = 0; else if(b > 255) b = 255;
+
+        /* Gamma antes do brilho: a curva trabalha na faixa cheia de 0-255, e
+         * o brilho so escala o resultado depois. */
+        r = s_gamma_lut[r] * bright / 100;
+        g = s_gamma_lut[g] * bright / 100;
+        b = s_gamma_lut[b] * bright / 100;
 
         px[i] = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
     }

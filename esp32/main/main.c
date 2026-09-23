@@ -183,10 +183,14 @@ static void ui_status(const char *text)
  * ate 15 s no handshake TLS -- dentro do timer do LVGL isso congelaria a tela
  * e acionaria o watchdog.
  */
+/* Falhas seguidas antes de avisar na tela. */
+#define FALHAS_PARA_AVISAR 3
+
 static void spotify_task(void *arg)
 {
     (void)arg;
     esp_task_wdt_add(NULL);
+    int falhas = 0;
 
     for(;;) {
         esp_task_wdt_reset();
@@ -235,13 +239,20 @@ static void spotify_task(void *arg)
                 bsp_display_unlock();
             }
             spotify_music_info_free(&info);
+            falhas = 0;
         }
         else {
-            /* Falha de consulta nao vai para a tela: com keep-alive o servidor
-             * derruba a conexao ociosa de tempos em tempos, e a volta seguinte
-             * ja reconecta. Mostrar isso so encobriria a faixa atual com um
-             * aviso que se resolve sozinho. O log continua registrando. */
             ESP_LOGW(TAG, "spotify: %s", spotify_strerror(err));
+
+            /* Uma falha isolada nao vai para a tela: com keep-alive o servidor
+             * derruba a conexao ociosa de tempos em tempos e a volta seguinte
+             * reconecta. Mas insistir em falhar significa problema de verdade
+             * -- servidor fora, cota da API estourada, rede caida -- e ai ficar
+             * mudo deixa a tela parada sem explicacao nenhuma. */
+            if(++falhas >= FALHAS_PARA_AVISAR) {
+                ui_status(err == SPOTIFY_ERR_NOTHING ? "Nada tocando"
+                                                     : "Servidor indisponivel");
+            }
         }
 
         log_heap("apos fetch");
