@@ -2,9 +2,9 @@
  * @file spotify.h
  *
  * Cliente HTTP mínimo e portável (PC / ESP32) para obter as informações da
- * música tocando atualmente a partir de um servidor local.
+ * música tocando atualmente a partir do servidor (SPOTIFY_URL).
  *
- * GET http://127.0.0.1:3000/get_music_info  ->  JSON:
+ * GET SPOTIFY_URL  ->  JSON:
  *   {
  *     "music_id":            "...",
  *     "music_name":          "...",

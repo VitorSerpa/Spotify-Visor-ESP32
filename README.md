@@ -1,189 +1,129 @@
-# VSCode Simulator project for LVGL
+# Spotify Display
 
-[LVGL](https://github.com/lvgl/lvgl) is written mainly for microcontrollers and embedded systems, however you can run the library **on your PC** as well without any embedded hardware. The code written on PC can be simply copied when your are using an embedded system.
+Display de "tocando agora" do Spotify feito com [LVGL](https://github.com/lvgl/lvgl).
+Mostra a capa do álbum girando sobre um fundo borrado da própria capa, o nome da
+música, os artistas e uma barra de progresso com os tempos decorrido e total.
 
-This project is pre-configured for VSCode and should work work on Windows, Linux and MacOs as well. FreeRTOS is also included and can be optionally enabled to better simulate embedded system's behavior. 
+A mesma interface (`src/UI/screen.c`) roda em dois lugares:
 
-## Get started
+- **Simulador no PC** (SDL), para desenvolver a tela sem hardware.
+- **ESP32-2432S028R** ("Cheap Yellow Display"): TFT 240x320 com ILI9341 via SPI.
 
-### Install SDL and the build tools
+## Como funciona
 
-- **Windows (vcpkg):** `vcpkg install sdl2`  (`vcpkg` can be installed from [https://github.com/microsoft/vcpkg](https://github.com/microsoft/vcpkg)) Also install either MinGW or another compiler and `cmake`.
-- **macOS (Homebrew):** `brew install sdl2 cmake make`  
-- **Linux:**  
-  - **Debian/Ubuntu:** `sudo apt install build-essential cmake libsdl2-dev`  
-  - **Arch:** `sudo pacman -S base-devel cmake sdl2`  
-  - **Fedora:** `sudo dnf install @development-tools cmake SDL2-devel`  
-- **Manual Installation of SDL:** Download from [SDL’s website](https://github.com/libsdl-org/SDL/releases) and place headers/libraries in your project.
-- **Verify Installation:** `sdl2-config --version`, `cmake --version`, `gcc --version`, `g++ --version` (should return the installed version).  
-
-### Get the PC project
-
-Clone the PC project and the related sub modules:
-
-```bash
-git clone --recursive https://github.com/lvgl/lv_port_pc_vscode
+```
+Spotify Web API  ──>  servidor web  ──>  GET /get_music_info (JSON)  ──>  display
 ```
 
-## Usage
+O display não fala direto com o Spotify: ele consulta um servidor intermediário
+que cuida da autenticação e devolve um JSON já pronto para a tela, com as capas
+em base64:
 
-### Visual Studio Code
-
-1. Be sure you have installed [SDL and the build tools](#install-sdl-and-the-build-tools)
-2. Open the project by double clicking on `simulator.code-workspace` or opening it with `File/Open Workspace from File`
-3. Install the recommended plugins
-4. Click the Run and Debug page on the left, and select `Debug LVGL demo with gdb` from the drop-down on the top. Like this:
-![image](https://github.com/lvgl/lv_port_pc_vscode/assets/7599318/f527b235-5718-4949-b5f0-bd807b3a64ba)
-5. Click the Play button or hit F5 to start debugging.
-
-#### ArchLinux User
-
-VSCode does not officially provide an installation package under Arch, you need to use the AUR manager `paru` to install it.
-The command is as follows:
-
-```bash
-paru -S visual-studio-code-bin
-```
-
-#### macOS
-
-Apple's default clang does not support the `-fsanitize=leak` flag.
-
-to build using the latest version of clang from homebrew, do the following:
-
-1. `brew install llvm`
-
-2. cmd+shift+p and run `Cmake: select a kit`, then `[Scan for kits]`
-
-3. then cmd+shift+p and run `Cmake: select a kit`, select the version of clang you just installed from homebrew (it should say `Using compilers C=/opt/homebrew/opt/llvm/bin/clang ...`)
-
-4. reconfigure by running cmd+shift+p `Cmake: Configure`
-
-5. build using [step 4 above](#visual-studio-code)
-
-### FreeRTOS configuration
-To correctly configure the project, the RTOS (Real-Time Operating System) requires a significant amount of heap memory, especially when debugging an SDL (Simple DirectMedia Layer) window application. In this project, the heap memory has been experimentally set to **512 MB**.
-
-```c
-#define configTOTAL_HEAP_SIZE ( ( size_t ) ( 512 * 1024 * 1024 ) )  // 512 MB Heap
-```
-This configuration ensures that the SDL window is displayed in a timely manner. If this value is reduced, it may cause significant delays in the SDL window's appearance. If the allocated heap memory is too small, the window may fail to appear altogether.
-Therefore, it is crucial to allocate sufficient heap memory to ensure smooth execution and debugging experience.
-
-### Enable FreeRTOS 
-To enable the rtos part of this project select in lv_conf.h `#define LV_USE_OS   LV_OS_NONE` to `#define LV_USE_OS  LV_OS_FREERTOS`
-Additionaly you have to enable the compilation of all FreeRTOS Files by turning on the `option(USE_FREERTOS "Enable FreeRTOS" OFF)` in the CMakeLists.txt file or
-by enabling the same flag from the command line when bootstrapping `cmake`:
-
-```bash
-cmake -B build -DUSE_FREERTOS=ON
-```
-
-### CMake
-
-This project uses CMake under the hood which can be used without Visula Studio Code too. Just type these in a Terminal when you are in the project's root folder:
-
-```bash
-mkdir build
-cd build
-cmake ..
-make -j
-```
-
-## Run demos and examples
-
-By default, the widgets demo (`lv_demo_widgets()`) will run. If you want to run a different demo or example from the LVGL library,
-simply replace the demo function call in the code with another one—such as `lv_demo_benchmark()` or `lv_example_label_1()`.
-
-```c
-int main(int argc, char **argv)
+```json
 {
-  /* ... */
-  /* Run the default demo */
-  /* To try a different demo or example, replace this with one of: */
-  /* - lv_demo_benchmark(); */
-  /* - lv_demo_stress(); */
-  /* - lv_example_label_1(); */
-  /* - etc. */
-  lv_demo_widgets(); 
-
-  while(1) {
-      /* ... */
-  }
-  return 0;
+  "music_id": "...",
+  "music_name": "...",
+  "artists": "...",
+  "player_progress_ms": 12345,
+  "music_duration_ms": 210000,
+  "album_cover": "<base64>",
+  "blurry_album_cover": "<base64>"
 }
 ```
 
-## Optional library
+Resposta `204` significa que nada está tocando. O endpoint padrão é
+`https://spotifydisplay.onrender.com/get_music_info` e pode ser trocado por
+`SPOTIFY_URL` (PC) ou pelo menuconfig (ESP32).
 
-There are also FreeType and FFmpeg support. You can install these according to the followings:
+Entre uma consulta e outra (15 s, para não estourar a cota da API) a barra de
+progresso continua andando pelo relógio local, e cada resposta nova corrige o
+desvio.
 
-### Linux
+## Estrutura
+
+```
+src/
+  UI/screen.c, screen.h   interface LVGL, compartilhada entre PC e ESP32
+  UI/fonts/               fontes Latin-1 (acentos) e japonesa (kana + kanji)
+  UI/images/              imagens de exemplo usadas pelo simulador
+  spotify/                cliente HTTP + parser JSON (libcurl no PC, esp_http_client no ESP32)
+  main.c, hal/            ponto de entrada e drivers SDL do simulador
+esp32/
+  main/main.c             app_main: WiFi, display e task de consulta
+  main/bsp_display.c      painel ILI9341, backlight e esp_lvgl_port
+  main/cover.c            decodificação JPEG e ajuste de cor (saturação, gamma, brilho)
+  main/wifi_sta.c         WiFi com rede principal e alternativa
+  main/Kconfig.projbuild  opções do menu "Spotify Display"
+  sdkconfig.defaults      ajustes de memória, TLS e LVGL para a placa
+  partitions.csv          app de 3.75 MB (as fontes japonesas moram na flash)
+lvgl/, FreeRTOS/          submódulos
+```
+
+## Clonar
+
+O LVGL e o FreeRTOS são submódulos:
 
 ```bash
-# FreeType support
-wget https://kumisystems.dl.sourceforge.net/project/freetype/freetype2/2.13.2/freetype-2.13.2.tar.xz
-tar -xf freetype-2.13.2.tar.xz
-cd freetype-2.13.2
-make
-make install
+git clone --recursive <url-deste-repositorio>
+# ou, se já clonou sem --recursive:
+git submodule update --init --recursive
 ```
+
+## Simulador no PC
+
+Dependências: CMake, um compilador C, SDL2 e libcurl.
+
+| Sistema        | Comando                                                        |
+|----------------|----------------------------------------------------------------|
+| Fedora         | `sudo dnf install @development-tools cmake SDL2-devel libcurl-devel` |
+| Debian/Ubuntu  | `sudo apt install build-essential cmake libsdl2-dev libcurl4-openssl-dev` |
+| Arch           | `sudo pacman -S base-devel cmake sdl2 curl`                    |
+| macOS          | `brew install cmake sdl2 curl`                                 |
+| Windows        | `vcpkg install sdl2 curl`                                      |
 
 ```bash
-# FFmpeg support
-git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
-cd ffmpeg
-git checkout release/6.0
-./configure --disable-all --disable-autodetect --disable-podpages --disable-asm --enable-avcodec --enable-avformat --enable-decoders --enable-encoders --enable-demuxers --enable-parsers --enable-protocol='file' --enable-swscale --enable-zlib
-make
-sudo make install
+cmake -B build
+cmake --build build -j
+cmake --build build --target run   # roda a partir da raiz, onde estão as imagens
 ```
-### (RT)OS support
-Works with any OS like pthred, Windows, FreeRTOS, etc. It has build in support for FreeRTOS. 
 
-## Test
-This project is configured for [VSCode](https://code.visualstudio.com) and is tested on: 
-- Ubuntu Linux 
-- Windows WSL (Ubuntu Linux)
+No VS Code, abra `simulator.code-workspace` e use a configuração de debug já
+pronta.
 
-It requires a working version of GCC, GDB and make in your path.
+## ESP32
 
-To allow debugging inside VSCode you will also require a GDB [extension](https://marketplace.visualstudio.com/items?itemName=webfreak.debug) or other suitable debugger. All the requirements, build and debug settings have been pre-configured in the [.workspace](simulator.code-workspace) file.
-
-The project can use **SDL** but it can be easily relaced by any other built-in LVGL dirvers.
-
-## Integration with LVGL Pro
-
-This project supports integration with LVGL Pro projects for UI development.
-
-### Setup
-
-1. Configure CMake with your LVGL Pro project folder:
+Requer [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) 5.3 ou mais
+recente. As dependências (LVGL, `esp_lvgl_port`, driver ILI9341, `esp_jpeg`)
+são baixadas pelo gerenciador de componentes no primeiro build.
 
 ```bash
-cmake -B build -DLVGL_PRO_PROJECT_DIR=<path-to-lvgl-pro-project>
+cd esp32
+idf.py set-target esp32
+idf.py menuconfig     # Spotify Display -> WiFi SSID / senha
+idf.py build flash monitor
 ```
 
-Build your project:
+As credenciais do WiFi ficam em `esp32/sdkconfig`, que está no `.gitignore`.
+Nunca coloque a senha nos `default` do `Kconfig.projbuild`, porque esse
+arquivo é versionado.
 
-```bash
-cmake --build build
-```
+Opções principais no menu **Spotify Display**:
 
-### Usage in Code
+| Opção                      | Padrão | O que faz                                         |
+|----------------------------|--------|---------------------------------------------------|
+| `WIFI_SSID` / `_PASSWORD`  | —      | rede principal                                    |
+| `WIFI_SSID2` / `_PASSWORD2`| vazio  | rede alternativa (ex.: hotspot do celular)        |
+| `SPOTIFY_ENDPOINT`         | onrender | URL do servidor                                 |
+| `SPOTIFY_POLL_INTERVAL_MS` | 15000  | intervalo entre consultas                         |
+| `LCD_BRIGHTNESS`           | 45     | brilho do backlight (%)                           |
+| `BG_BRIGHTNESS`            | 40     | brilho do fundo borrado (%)                       |
+| `IMAGE_GAMMA`              | 145    | gamma das imagens (100 = sem ajuste)              |
+| `COVER_SATURATION`         | 125    | saturação da capa (compensa o RGB565)             |
+| `LCD_SWAP_XY` / `MIRROR_*` / `INVERT_COLOR` | — | orientação e cores do painel     |
+| `LCD_TEST_PATTERN`         | n      | padrão de teste no boot para calibrar o painel    |
 
-In your main.c, include the UI header from your LVGL Pro project and replace the default demo with your screen.
+## Créditos
 
-```c
-#include "ui.h"
-
-int main(void) {
-
-    /*Initialization code for LVGL*/
-    
-    /* Initialize the LVGL Pro UI */
-    ui_init("<path-to-lvgl-pro-project>");
-    
-    /* ... rest of your application ...*/
-}
-```
+Baseado no [lv_port_pc_vscode](https://github.com/lvgl/lv_port_pc_vscode), o
+projeto oficial de simulador do LVGL para PC. Fonte japonesa derivada da Droid
+Sans Japanese. Licença MIT (ver `licence.txt`).
