@@ -3,6 +3,7 @@
 ![ESP32](https://img.shields.io/badge/ESP32-ESP--IDF%205.3+-E7352C?logo=espressif&logoColor=white)
 ![LVGL](https://img.shields.io/badge/LVGL-9.x-343839)
 ![C](https://img.shields.io/badge/linguagem-C-00599C?logo=c&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-Express-339933?logo=nodedotjs&logoColor=white)
 ![License](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 
 Um visor de "tocando agora" do Spotify para a mesa, rodando num ESP32 com tela
@@ -10,11 +11,15 @@ TFT de 2.8". Mostra a capa do álbum girando sobre um fundo borrado da própria
 capa, o nome da música, os artistas e uma barra de progresso com os tempos
 decorrido e total.
 
-A interface é escrita uma única vez com [LVGL](https://github.com/lvgl/lvgl)
-(`src/UI/screen.c`) e roda em dois alvos:
+O projeto tem três partes:
 
-- **ESP32-2432S028R** ("Cheap Yellow Display"): TFT 240x320 com ILI9341 via SPI.
-- **Simulador no PC** (SDL2), para desenvolver a tela sem precisar gravar a placa.
+- **Firmware para ESP32-2432S028R** ("Cheap Yellow Display"): TFT 240x320 com
+  ILI9341 via SPI.
+- **Simulador no PC** (SDL2), para desenvolver a tela sem precisar gravar a
+  placa. A interface é escrita uma única vez com
+  [LVGL](https://github.com/lvgl/lvgl) (`src/UI/screen.c`) e é a mesma nos dois.
+- **Servidor intermediário** em Node.js (`server/`), que fala com a API do
+  Spotify e entrega as capas já processadas para a placa.
 
 <!-- Coloque aqui uma foto ou GIF da placa funcionando, por exemplo:
 ![Spotify Visor](docs/visor.jpg)
@@ -25,8 +30,9 @@ A interface é escrita uma única vez com [LVGL](https://github.com/lvgl/lvgl)
 - **Mesmo código de UI no PC e no microcontrolador**: só a camada de rede e o
   driver de display mudam (libcurl + SDL no PC, `esp_http_client` + `esp_lcd`
   no ESP32).
-- **Capa girando com recorte circular** e fundo borrado gerado a partir da
-  própria capa.
+- **Capa em estilo CD girando** sobre um fundo borrado da própria capa. O
+  servidor gera as duas imagens com o sharp, no tamanho exato da tela, porque
+  decodificar a capa original de 640x640 não caberia na RAM do ESP32.
 - **Barra de progresso suave**: entre uma consulta e outra o tempo avança pelo
   relógio local, e cada resposta nova corrige o desvio.
 - **Títulos em japonês e com acentos**: fontes Latin-1 e japonesa (kana + 6357
@@ -36,27 +42,30 @@ A interface é escrita uma única vez com [LVGL](https://github.com/lvgl/lvgl)
   ajuste de VCOM e gamma do ILI9341.
 - **Feito para caber sem PSRAM**: buffers de WiFi, lwIP e TLS reduzidos e
   conexão HTTPS keep-alive (ver `esp32/sdkconfig.defaults`).
+- **Credenciais fora da placa**: o OAuth do Spotify fica todo no servidor; o
+  ESP32 só faz um GET, sem guardar nenhum token.
 - **WiFi com rede reserva**: tenta a rede principal e, se falhar, uma segunda
   (por exemplo, o hotspot do celular).
 
 ## Arquitetura
 
 ```
-┌──────────────┐      ┌────────────────────┐      ┌──────────────────────┐
-│ Spotify Web  │ ───> │ servidor           │ ───> │ ESP32 / simulador    │
-│ API (OAuth)  │      │ intermediário      │ JSON │ GET /get_music_info  │
-└──────────────┘      └────────────────────┘      └──────────────────────┘
+┌──────────────┐  OAuth  ┌──────────────────────┐  JSON  ┌──────────────────────┐
+│ Spotify Web  │ <─────> │ server/ (Node.js)    │ <───── │ ESP32 / simulador    │
+│ API          │         │ token + capas (sharp)│ 15 s   │ GET /get_music_info  │
+└──────────────┘         └──────────────────────┘        └──────────────────────┘
 ```
 
-O display não fala direto com o Spotify. Um servidor intermediário cuida da
-autenticação OAuth e devolve um JSON pronto para a tela, com as capas em
-base64:
+O display não fala direto com o Spotify. O servidor (`server/`) cuida da
+autenticação OAuth, renova o access token quando ele expira e devolve um JSON
+pronto para a tela, com a capa (200x200, estilo CD) e o fundo borrado (60x80)
+em JPEG base64:
 
 ```json
 {
   "music_id": "...",
   "music_name": "...",
-  "artists": "...",
+  "artists": ["...", "..."],
   "player_progress_ms": 12345,
   "music_duration_ms": 210000,
   "album_cover": "<base64>",
@@ -103,6 +112,9 @@ esp32/
   main/Kconfig.projbuild  opções do menu "Spotify Display"
   sdkconfig.defaults      ajustes de memória, TLS e LVGL para a placa
   partitions.csv          app de 3.75 MB (as fontes japonesas ficam na flash)
+server/
+  app.js                  rotas do Express
+  controllers/            OAuth, renovação de token e processamento das capas
 lvgl/                     submódulo do LVGL (usado pelo simulador)
 lv_conf.h                 configuração do LVGL do simulador
 ```
@@ -116,6 +128,19 @@ git clone --recursive https://github.com/VitorSerpa/Spotify-Visor-ESP32.git
 # ou, se já clonou sem --recursive:
 git submodule update --init --recursive
 ```
+
+## Rodando o servidor
+
+```bash
+cd server
+cp .env.example .env    # CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, REFRESH_TOKEN
+npm install
+npm start
+```
+
+Como criar o app no Spotify, obter o refresh token e fazer o deploy está em
+[`server/README.md`](server/README.md). Para usar a versão em produção não é
+preciso rodar o servidor: o firmware e o simulador já apontam para ela.
 
 ## Rodando no ESP32
 

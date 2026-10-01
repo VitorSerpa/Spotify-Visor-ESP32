@@ -21,3 +21,6 @@ esp32/dependencies.lock
 .env
 *.env
 .ENV
+
+# Servidor (Node.js)
+node_modules/
