@@ -1,44 +1,9 @@
 cmake_minimum_required(VERSION 3.12.4)
-project(lvgl C CXX)
-
-# Set the correct FreeRTOS port for your system (e.g., Posix for WSL)
-set(FREERTOS_PORT GCC_POSIX CACHE STRING "Port for FreeRTOS on Posix environment")
+project(spotify_visor C CXX)
 
 set(LVGL_PRO_PROJECT_DIR
     ""
     CACHE PATH "Path to LVGL Pro Project folder")
-
-option(USE_FREERTOS "Enable FreeRTOS" OFF) # Turn this on to enable FreeRTOS
-
-if(USE_FREERTOS)
-    message(STATUS "FreeRTOS is enabled")
-
-    # FreeRTOS integration when USE_FREERTOS is enabled
-    add_library(freertos_config INTERFACE)
-    target_include_directories(freertos_config SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/config)
-    target_compile_definitions(freertos_config INTERFACE projCOVERAGE_TEST=0)
-
-    # Add FreeRTOS as a subdirectory
-    add_subdirectory(FreeRTOS)
-
-    # FreeRTOS-specific include directories
-    include_directories(${PROJECT_SOURCE_DIR}/FreeRTOS/include)
-    include_directories(${PROJECT_SOURCE_DIR}/FreeRTOS/portable/ThirdParty/GCC/Posix)
-    include_directories(${PROJECT_SOURCE_DIR}/config)
-
-    # Add FreeRTOS sources
-    file(GLOB FREERTOS_SOURCES
-        "${PROJECT_SOURCE_DIR}/FreeRTOS/*.c"
-        "${PROJECT_SOURCE_DIR}/FreeRTOS/portable/MemMang/heap_4.c"
-        "${PROJECT_SOURCE_DIR}/FreeRTOS/portable/ThirdParty/GCC/Posix/*.c"
-    )
-else()
-    message(STATUS "FreeRTOS is disabled")
-    set(FREERTOS_SOURCES "")  # No FreeRTOS sources if FreeRTOS is disabled
-endif()
-
-# Main include files of the project
-include_directories(${PROJECT_SOURCE_DIR}/main/inc)
 
 # Define options for LVGL with default values (OFF)
 option(LV_USE_DRAW_SDL "Use SDL draw unit" OFF)
@@ -74,13 +39,7 @@ set(MAIN_SOURCES src/mouse_cursor_icon.c src/hal/hal.c src/UI/screen.c src/spoti
     src/UI/fonts/lv_font_jp_14.c src/UI/fonts/lv_font_jp_20.c)
 set(MAIN_LIBS lvgl lvgl::examples lvgl::demos lvgl::thorvg ${SDL2_LIBRARIES})
 
-# Create the main executable, depending on the FreeRTOS option
-if(USE_FREERTOS)
-    list(APPEND MAIN_SOURCES src/freertos_main.c src/freertos/freertos_posix_port.c ${FREERTOS_SOURCES})
-    list(APPEND MAIN_LIBS freertos_config freertos_kernel)
-else()
-    list(APPEND MAIN_SOURCES src/main.c)
-endif()
+list(APPEND MAIN_SOURCES src/main.c)
 
 
 if(NOT MSVC)

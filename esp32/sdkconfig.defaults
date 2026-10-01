@@ -1,6 +1,6 @@
 CONFIG_IDF_TARGET="esp32"
 
-# 4 MB de flash e tabela de particoes propria (app de 2 MB).
+# 4 MB de flash e tabela de particoes propria (app de 3.75 MB, ver partitions.csv).
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
@@ -25,7 +25,7 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
 
 # O WiFi reserva ~48 KB de buffers dimensionados para throughput alto. Aqui a
-# rede busca ~18 KB a cada 3 s, entao esses buffers sao folga pura -- e a
+# rede busca ~18 KB a cada 15 s, entao esses buffers sao folga pura -- e a
 # memoria que eles liberam e o que permite a capa redonda de 200x200.
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=12
