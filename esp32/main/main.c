@@ -251,6 +251,7 @@ static void spotify_task(void *arg)
              * mudo deixa a tela parada sem explicacao nenhuma. */
             if(++falhas >= FALHAS_PARA_AVISAR) {
                 ui_status(err == SPOTIFY_ERR_NOTHING ? "Nada tocando"
+                        : err == SPOTIFY_ERR_AUTH    ? "Chave da API invalida"
                                                      : "Servidor indisponivel");
             }
         }

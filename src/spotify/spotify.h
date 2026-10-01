@@ -4,11 +4,11 @@
  * Cliente HTTP mínimo e portável (PC / ESP32) para obter as informações da
  * música tocando atualmente a partir do servidor (SPOTIFY_URL).
  *
- * GET SPOTIFY_URL  ->  JSON:
+ * GET SPOTIFY_URL  (Authorization: Bearer SPOTIFY_API_KEY)  ->  JSON:
  *   {
  *     "music_id":            "...",
  *     "music_name":          "...",
- *     "artists":             "...",
+ *     "artists":             ["...", "..."],
  *     "player_progress_ms":   12345,
  *     "music_duration_ms":    210000,
  *     "album_cover":         "<base64>",
@@ -42,6 +42,18 @@ extern "C" {
   #endif
 #endif
 
+/* Chave enviada como "Authorization: Bearer <chave>"; precisa ser igual ao
+ * API_KEY do servidor. No ESP-IDF vem do menuconfig (CONFIG_SPOTIFY_API_KEY).
+ * No PC a variavel de ambiente SPOTIFY_API_KEY tem prioridade sobre esta macro,
+ * para a chave nao precisar ficar no codigo nem no binario. */
+#ifndef SPOTIFY_API_KEY
+  #ifdef CONFIG_SPOTIFY_API_KEY
+    #define SPOTIFY_API_KEY CONFIG_SPOTIFY_API_KEY
+  #else
+    #define SPOTIFY_API_KEY ""
+  #endif
+#endif
+
 /**********************
  *      TYPEDEFS
  **********************/
@@ -66,6 +78,7 @@ typedef enum {
     SPOTIFY_ERR_PARSE,    /* JSON inesperado                         */
     SPOTIFY_ERR_MEM,      /* sem memória                             */
     SPOTIFY_ERR_NOTHING,  /* HTTP 204: nada tocando no momento       */
+    SPOTIFY_ERR_AUTH,     /* HTTP 401: chave da API ausente/errada   */
 } spotify_err_t;
 
 /**********************

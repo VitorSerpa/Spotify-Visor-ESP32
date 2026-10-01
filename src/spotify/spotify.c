@@ -337,6 +337,12 @@ static spotify_err_t http_get(const char *url, char **body_out, size_t *body_len
         };
         s_client = esp_http_client_init(&cfg);
         if(!s_client) { free(s_filter.buf.data); return SPOTIFY_ERR_SOCKET; }
+
+        /* O cabecalho fica gravado no cliente e vale para todas as consultas
+         * seguintes da mesma conexao. */
+        if(SPOTIFY_API_KEY[0] != '\0') {
+            esp_http_client_set_header(s_client, "Authorization", "Bearer " SPOTIFY_API_KEY);
+        }
     }
 
     const esp_err_t err    = esp_http_client_perform(s_client);
@@ -353,6 +359,11 @@ static spotify_err_t http_get(const char *url, char **body_out, size_t *body_len
     }
     /* 204 = requisicao ok, mas nao ha nada tocando no Spotify agora. */
     if(status == 204) { free(s_filter.buf.data); return SPOTIFY_ERR_NOTHING; }
+    if(status == 401) {
+        ESP_LOGW(TAG, "HTTP 401: confira o SPOTIFY_API_KEY no menuconfig");
+        free(s_filter.buf.data);
+        return SPOTIFY_ERR_AUTH;
+    }
     if(status != 200) {
         ESP_LOGW(TAG, "HTTP %d", status);
         free(s_filter.buf.data);
@@ -410,11 +421,24 @@ static spotify_err_t http_get(const char *url, char **body_out, size_t *body_len
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "lvgl-spotify/1.0");
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, ""); /* aceita gzip/deflate */
 
+    /* Chave da API: a variavel de ambiente tem prioridade sobre a macro. */
+    const char *api_key = getenv("SPOTIFY_API_KEY");
+    if(!api_key || api_key[0] == '\0') api_key = SPOTIFY_API_KEY;
+
+    struct curl_slist *headers = NULL;
+    if(api_key[0] != '\0') {
+        char auth[512];
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", api_key);
+        headers = curl_slist_append(headers, auth);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    }
+
     CURLcode res = curl_easy_perform(curl);
 
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
 
     if(res != CURLE_OK) {
         /* curl_easy_strerror(res) tem a mensagem detalhada, se quiser logar. */
@@ -423,6 +447,7 @@ static spotify_err_t http_get(const char *url, char **body_out, size_t *body_len
     }
     /* 204 = requisição ok, mas não há nada tocando no Spotify agora. */
     if(status == 204) { free(buf.data); return SPOTIFY_ERR_NOTHING; }
+    if(status == 401) { free(buf.data); return SPOTIFY_ERR_AUTH; }
     if(status != 200) {
         free(buf.data);
         return SPOTIFY_ERR_HTTP;
@@ -631,6 +656,7 @@ const char *spotify_strerror(spotify_err_t err)
         case SPOTIFY_ERR_PARSE:  return "JSON inesperado";
         case SPOTIFY_ERR_MEM:    return "sem memoria";
         case SPOTIFY_ERR_NOTHING:return "nada tocando";
+        case SPOTIFY_ERR_AUTH:   return "chave da API invalida";
         default:                 return "erro desconhecido";
     }
 }

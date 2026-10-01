@@ -43,7 +43,10 @@ O projeto tem três partes:
 - **Feito para caber sem PSRAM**: buffers de WiFi, lwIP e TLS reduzidos e
   conexão HTTPS keep-alive (ver `esp32/sdkconfig.defaults`).
 - **Credenciais fora da placa**: o OAuth do Spotify fica todo no servidor; o
-  ESP32 só faz um GET, sem guardar nenhum token.
+  ESP32 guarda só uma chave própria para falar com ele.
+- **Pronto para qualquer conta**: cada pessoa sobe o próprio servidor com o
+  próprio app do Spotify. Nenhuma credencial fica no código, e as rotas são
+  protegidas por chave e pelo `state` do OAuth.
 - **WiFi com rede reserva**: tenta a rede principal e, se falhar, uma segunda
   (por exemplo, o hotspot do celular).
 
@@ -73,9 +76,8 @@ em JPEG base64:
 }
 ```
 
-Uma resposta `204` significa que nada está tocando. O endpoint padrão é
-`https://spotifydisplay.onrender.com/get_music_info` e pode ser trocado pela
-macro `SPOTIFY_URL` em tempo de compilação (PC) ou pelo menuconfig (ESP32).
+O display se identifica com o cabeçalho `Authorization: Bearer <API_KEY>`.
+Uma resposta `204` significa que nada está tocando, e `401`, chave errada.
 
 A consulta acontece a cada 15 s, para não estourar a cota da API do Spotify.
 
@@ -113,8 +115,9 @@ esp32/
   sdkconfig.defaults      ajustes de memória, TLS e LVGL para a placa
   partitions.csv          app de 3.75 MB (as fontes japonesas ficam na flash)
 server/
-  app.js                  rotas do Express
+  app.js, auth.js         rotas do Express e verificação da chave da API
   controllers/            OAuth, renovação de token e processamento das capas
+  .env.example            variáveis necessárias (os valores reais nunca vão para o git)
 lvgl/                     submódulo do LVGL (usado pelo simulador)
 lv_conf.h                 configuração do LVGL do simulador
 ```
@@ -129,18 +132,21 @@ git clone --recursive https://github.com/VitorSerpa/Spotify-Visor-ESP32.git
 git submodule update --init --recursive
 ```
 
-## Rodando o servidor
+## Usando com a sua conta
 
-```bash
-cd server
-cp .env.example .env    # CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, REFRESH_TOKEN
-npm install
-npm start
-```
+1. **Servidor**: crie um app no Spotify, preencha o `server/.env` e faça o
+   login uma vez. O passo a passo, incluindo o deploy, está em
+   [`server/README.md`](server/README.md).
 
-Como criar o app no Spotify, obter o refresh token e fazer o deploy está em
-[`server/README.md`](server/README.md). Para usar a versão em produção não é
-preciso rodar o servidor: o firmware e o simulador já apontam para ela.
+   ```bash
+   cd server
+   cp .env.example .env    # CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, API_KEY
+   npm install
+   npm start               # depois abra /auth_spotify?key=<API_KEY>
+   ```
+
+2. **Display**: aponte o firmware ou o simulador para o seu servidor, com a
+   mesma `API_KEY` (seções abaixo).
 
 ## Rodando no ESP32
 
@@ -151,13 +157,13 @@ são baixadas pelo gerenciador de componentes no primeiro build.
 ```bash
 cd esp32
 idf.py set-target esp32
-idf.py menuconfig     # Spotify Display -> WiFi SSID / senha
+idf.py menuconfig     # Spotify Display -> WiFi, endpoint e chave da API
 idf.py build flash monitor
 ```
 
-As credenciais do WiFi ficam em `esp32/sdkconfig`, que está no `.gitignore`.
-Não coloque a senha nos `default` do `Kconfig.projbuild`, porque esse arquivo
-é versionado.
+A senha do WiFi e a chave da API ficam em `esp32/sdkconfig`, que está no
+`.gitignore`. Não coloque esses valores nos `default` do `Kconfig.projbuild`,
+porque esse arquivo é versionado.
 
 Opções principais no menu **Spotify Display**:
 
@@ -165,7 +171,8 @@ Opções principais no menu **Spotify Display**:
 |----------------------------|----------|------------------------------------------------|
 | `WIFI_SSID` / `_PASSWORD`  | —        | rede principal                                 |
 | `WIFI_SSID2` / `_PASSWORD2`| vazio    | rede alternativa (ex.: hotspot do celular)     |
-| `SPOTIFY_ENDPOINT`         | onrender | URL do servidor                                |
+| `SPOTIFY_ENDPOINT`         | onrender | URL do `/get_music_info` do seu servidor       |
+| `SPOTIFY_API_KEY`          | vazio    | igual ao `API_KEY` do servidor                 |
 | `SPOTIFY_POLL_INTERVAL_MS` | 15000    | intervalo entre consultas                      |
 | `LCD_BRIGHTNESS`           | 45       | brilho do backlight (%)                        |
 | `BG_BRIGHTNESS`            | 40       | brilho do fundo borrado (%)                    |
@@ -189,7 +196,15 @@ Dependências: CMake, um compilador C, SDL2 e libcurl.
 ```bash
 cmake -B build
 cmake --build build -j
-cmake --build build --target run   # roda a partir da raiz, onde estão as imagens
+SPOTIFY_API_KEY=<API_KEY> cmake --build build --target run   # roda a partir da raiz
+```
+
+A chave vem da variável de ambiente `SPOTIFY_API_KEY`, para não ficar no código
+nem no binário. A URL é definida na compilação pela macro `SPOTIFY_URL`
+(`src/spotify/spotify.h`), por exemplo:
+
+```bash
+cmake -B build -DCMAKE_C_FLAGS='-DSPOTIFY_URL=\"http://127.0.0.1:3000/get_music_info\"'
 ```
 
 No VS Code, abra `simulator.code-workspace` e use a configuração de debug já

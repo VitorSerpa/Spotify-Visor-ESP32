@@ -1,9 +1,6 @@
 import axios from "axios";
 import { acessToken, refreshAcessTokenInternal } from "./refresh_token.js";
 import sharp from "sharp"
-import { configDotenv } from "dotenv";
-
-configDotenv()
 
 const SIZE = 200;
 const R = SIZE / 2;
@@ -90,6 +87,12 @@ const get_music_info = async (req, res) => {
     //Capa da Musica, Nome Musica, Artista, Duração da musica, Progresso do Player, Estado do Player
     let album_cover_URL = "", music_name = "", artists = [], player_progress_ms = 0, music_duration_ms = 0, album_cover = "", music_id = "", blurry_album_cover = ""
 
+    if (!process.env.REFRESH_TOKEN)
+        return res.status(503).json({
+            error: "spotify_login_required",
+            message: "Faca o login em /auth_spotify?key=<API_KEY>",
+        });
+
     try {
         const response = await fetch_currently_playing();
 
@@ -98,7 +101,7 @@ const get_music_info = async (req, res) => {
         
 
         music_id = response.data.item.id
-        album_cover_URL = response.data.item.album.images[0].url
+        album_cover_URL = response.data.item.album?.images?.[0]?.url
         music_name = response.data.item.name
         artists = response.data.item.artists.map(artists => artists.name)
         player_progress_ms = response.data.progress_ms
@@ -135,9 +138,9 @@ const get_music_info = async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err.response?.data);
+        console.log(err.response?.data ?? err.message);
 
-        res.status(500).json(err.response?.data);
+        res.status(500).json({ error: "spotify_error" });
     }
 };
 

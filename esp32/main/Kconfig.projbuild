@@ -42,6 +42,15 @@ menu "Spotify Display"
         string "URL do endpoint de informacoes da musica"
         default "https://spotifydisplay.onrender.com/get_music_info"
 
+    config SPOTIFY_API_KEY
+        string "Chave da API do servidor"
+        default ""
+        help
+            Enviada como "Authorization: Bearer <chave>" e precisa ser igual
+            ao API_KEY configurado no servidor. Configure pelo menuconfig: o
+            valor vai para o sdkconfig, que nao e versionado. Nao coloque a
+            chave real neste default.
+
     config SPOTIFY_POLL_INTERVAL_MS
         int "Intervalo entre consultas (ms)"
         default 15000
