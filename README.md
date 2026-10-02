@@ -135,18 +135,89 @@ git submodule update --init --recursive
 ## Usando com a sua conta
 
 1. **Servidor**: crie um app no Spotify, preencha o `server/.env` e faça o
-   login uma vez. O passo a passo, incluindo o deploy, está em
-   [`server/README.md`](server/README.md).
-
-   ```bash
-   cd server
-   cp .env.example .env    # CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, API_KEY
-   npm install
-   npm start               # depois abra /auth_spotify?key=<API_KEY>
-   ```
-
+   login uma vez (seção abaixo).
 2. **Display**: aponte o firmware ou o simulador para o seu servidor, com a
-   mesma `API_KEY` (seções abaixo).
+   mesma `API_KEY` (seções seguintes).
+
+## Configurando o servidor
+
+Requer Node.js 20.9 ou mais recente (exigência do sharp). Mais detalhes sobre
+rotas, segurança e processamento das imagens estão em
+[`server/README.md`](server/README.md).
+
+### 1. Crie um app no Spotify
+
+1. Entre no [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   e clique em **Create app**.
+2. Em **Redirect URIs**, cadastre o endereço do `/callback` do servidor:
+   - local: `http://127.0.0.1:3000/callback` (o Spotify não aceita
+     `localhost`, use o IP);
+   - em produção: `https://<seu-servidor>/callback`.
+3. Em **Which API/SDKs are you planning to use?**, marque **Web API**.
+4. Abra **Settings** e copie o **Client ID** e o **Client secret**.
+
+Apps novos ficam em modo de desenvolvimento. Para logar com outra conta além
+da que criou o app, adicione o e-mail dela em **User Management**.
+
+### 2. Configure as variáveis
+
+```bash
+cd server
+cp .env.example .env
+npm install
+```
+
+| Variável        | O que colocar                                       |
+|-----------------|-----------------------------------------------------|
+| `CLIENT_ID`     | Client ID do app                                    |
+| `CLIENT_SECRET` | Client secret do app                                |
+| `REDIRECT_URI`  | a mesma URI cadastrada no passo 1                   |
+| `API_KEY`       | uma senha aleatória (comando abaixo)                |
+| `REFRESH_TOKEN` | deixe vazio: ele sai do passo 3                     |
+| `PORT`          | opcional, padrão `3000`                             |
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+O servidor não sobe se faltar alguma variável obrigatória e avisa qual é.
+
+### 3. Faça login no Spotify (uma vez)
+
+```bash
+npm start      # ou: npm run dev (recarrega com nodemon)
+```
+
+Abra `http://127.0.0.1:3000/auth_spotify?key=<API_KEY>` no navegador e
+autorize o app. A página de retorno mostra o refresh token: copie-o para
+`REFRESH_TOKEN` no `.env`, senão ele se perde quando o servidor reiniciar.
+
+### 4. Teste
+
+```bash
+curl -H "Authorization: Bearer <API_KEY>" http://127.0.0.1:3000/get_music_info
+```
+
+`200` traz a música atual, `204` significa que nada está tocando, `401` é
+chave errada e `503` indica que falta o login do passo 3.
+
+Para a placa acessar um servidor na rede local, use o IP da máquina
+(`http://192.168.x.x:3000/get_music_info`), não `127.0.0.1`.
+
+### Deploy
+
+Qualquer serviço que rode Node.js serve (Render, Railway, Fly.io, uma VPS).
+No Render:
+
+1. **New → Web Service**, apontando para este repositório, com **Root
+   Directory** = `server`.
+2. Build: `npm install`. Start: `npm start`.
+3. Em **Environment**, cadastre `CLIENT_ID`, `CLIENT_SECRET`, `API_KEY` e
+   `REDIRECT_URI=https://<seu-servidor>/callback` (a mesma URI do app do
+   Spotify).
+4. Depois do primeiro deploy, faça o login em
+   `https://<seu-servidor>/auth_spotify?key=<API_KEY>` e cadastre o
+   `REFRESH_TOKEN` nas variáveis.
 
 ## Rodando no ESP32
 
